@@ -1,5 +1,4 @@
 import express from "express"
-import bodyParser from "body-parser"
 import mongoose from "mongoose"
 import cors from "cors"
 import dotenv from "dotenv"
@@ -19,8 +18,6 @@ app.use(express.json());
 app.use(helmet());
 app.use(helmet.crossOriginResourcePolicy({policy: "cross-origin"}));
 app.use(morgan("common"))
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({extended: false}))
 app.use(cors());
 // The order of these routes are important
 app.use('/users', userRoutes);
@@ -29,6 +26,7 @@ app.use('/general', generalRoutes);
 app.use(notFound)
 app.use(errorMiddleware)
 const PORT = process.env.PORT  || 5001;
+// MONGO_URL points at either local MongoDB or Amazon DocumentDB (TLS options go in the URL, see .env.example)
 mongoose.connect(process.env.MONGO_URL, {
 }).then(() => {
     app.listen(PORT, () => console.log(`Server Port: ${PORT}`));  

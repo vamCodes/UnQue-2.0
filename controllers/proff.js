@@ -88,18 +88,18 @@ const setAvailability = async (req, res, next) => {
         return next(new HttpError("No appointments found to cancel", 404));
       }
   
-      // Updating the status of all appointments to "canceled"
+      // Mark all booked appointments as 'cancelled' (must match the schema enum)
       await Appointment.updateMany(
         {
           studentId: new mongoose.Types.ObjectId(studentId),
           professorId: new mongoose.Types.ObjectId(professorId),
           status: 'booked'
         },
-        { status: 'canceled' }  //  the status  needs to be canceled
+        { status: 'cancelled' }
       );
-  
+
       res.status(200).json({
-        message: `All appointments between professor ${professorId} and student ${studentId} have been canceled.,`
+        message: `All appointments between professor ${professorId} and student ${studentId} have been cancelled.`
       });
   
     } catch (error) {
@@ -107,4 +107,70 @@ const setAvailability = async (req, res, next) => {
       return next(new HttpError(error));
     }
   };
-export {setAvailability, cancelAppointments};
+// Controller to update the timing of an existing FREE availability slot.
+// The slot document is kept (not deleted); only startTime/endTime change.
+const updateAvailability = async (req, res, next) => {
+  try {
+    const { availabilityId } = req.params;
+    const { startTime, endTime } = req.body;
+    const professorId = req.user.id;
+
+    if (!mongoose.Types.ObjectId.isValid(availabilityId)) {
+      return next(new HttpError("Invalid availability ID", 400));
+    }
+    if (!startTime || !endTime || new Date(startTime) >= new Date(endTime)) {
+      return next(new HttpError("A valid startTime and endTime (start before end) are required", 400));
+    }
+    const newStart = new Date(startTime);
+    const newEnd = new Date(endTime);
+
+    // Only the professor who owns this slot can change it
+    const slot = await Availability.findOne({
+      _id: new mongoose.Types.ObjectId(availabilityId),
+      professorId: new mongoose.Types.ObjectId(professorId),
+    });
+    if (!slot) {
+      return next(new HttpError("Availability slot not found", 404));
+    }
+
+    // Only FREE slots can be updated: refuse if any booked appointment falls inside it
+    const bookedCount = await Appointment.countDocuments({
+      professorId: slot.professorId,
+      status: 'booked',
+      time: { $gte: slot.startTime, $lte: slot.endTime },
+    });
+    if (bookedCount > 0) {
+      return next(new HttpError("This slot has booked appointments and cannot be updated", 409));
+    }
+
+    // The new timing must not overlap any OTHER availability slot of this professor
+    const overlap = await Availability.findOne({
+      professorId: slot.professorId,
+      _id: { $ne: slot._id },
+      startTime: { $lt: newEnd },
+      endTime: { $gt: newStart },
+    });
+    if (overlap) {
+      return next(new HttpError("New timing overlaps another availability slot", 400));
+    }
+
+    slot.startTime = newStart;
+    slot.endTime = newEnd;
+    await slot.save();
+
+    res.status(200).json({
+      message: "Availability updated successfully",
+      availability: {
+        _id: slot._id,
+        professorId: slot.professorId,
+        startTime: moment.utc(slot.startTime).format('MMMM Do YYYY, h:mm:ss a'),
+        endTime: moment.utc(slot.endTime).format('MMMM Do YYYY, h:mm:ss a'),
+      },
+    });
+  } catch (error) {
+    console.error("Error updating availability:", error);
+    return next(new HttpError("Updating availability failed", 500));
+  }
+};
+
+export {setAvailability, cancelAppointments, updateAvailability};
